@@ -49,6 +49,14 @@ const SYS_FIELDS_TRANSFORMS = new Map([
   [`updatedAt`, `publishedAt`],
   [`revision`, `publishedVersion`],
 ])
+const ASSET_FLAT_PROPERTIES = [
+  `url`,
+  `fileName`,
+  `contentType`,
+  `size`,
+  `width`,
+  `height`,
+]
 
 const isContentTypeSelector = selector => {
   if (!selector) {
@@ -311,8 +319,9 @@ function processGraphQLQuery(query, state) {
 
     graphql.visit(ast, {
       Argument(node) {
-        // flatten Contentful Asset filters
+        // Filtering
         if (node.name.value === `filter`) {
+          // flatten Contentful Asset filters
           const flatAssetFields = flattenAssetFields(node)
           if (flatAssetFields.length) {
             node.value.fields = injectNewFields(
@@ -323,6 +332,32 @@ function processGraphQLQuery(query, state) {
             hasChanged = true
           }
           // @todo sys field filters
+        }
+        // Sorting
+        if (node.name.value === `sort`) {
+          node.value.fields.forEach(sortField => {
+            // New sys structure
+            if (SYS_FIELDS_TRANSFORMS.has(sortField.value.value)) {
+              sortField.value.value = `sys___${SYS_FIELDS_TRANSFORMS.get(
+                sortField.value.value
+              )}`
+              hasChanged = true
+            }
+            if (sortField.value.value === `sys___type`) {
+              sortField.value.value = `sys___contentType`
+              hasChanged = true
+            }
+            // Flatten asset sort
+            if (sortField.value.value.indexOf(`file___`) !== -1) {
+              const flatSearchProperty = ASSET_FLAT_PROPERTIES.find(
+                propName => sortField.value.value.indexOf(propName) !== -1
+              )
+              if (flatSearchProperty) {
+                sortField.value.value = flatSearchProperty
+                hasChanged = true
+              }
+            }
+          })
         }
       },
       SelectionSet(node) {
@@ -395,8 +430,6 @@ function processGraphQLQuery(query, state) {
           hasChanged = true
           return
         }
-
-        // @todo transform sorting
 
         // @todo text field: field.field -> field.raw
 
