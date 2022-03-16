@@ -89,7 +89,7 @@ export function updateImport(babel) {
             `${renderFilename(
               path,
               state
-            )}: You may need to change "contentfulId" to "sys.id"`
+            )}: You might need to change "contentfulId" -> "sys.id"`
           )
         }
         if (path.node.name === `type`) {
@@ -97,7 +97,7 @@ export function updateImport(babel) {
             `${renderFilename(
               path,
               state
-            )}: You may need to change "type" to "sys.contentType.name"`
+            )}: You might need to change "type" -> "sys.contentType.name"`
           )
         }
         if (path.node.name === `contentType`) {
@@ -105,7 +105,7 @@ export function updateImport(babel) {
             `${renderFilename(
               path,
               state
-            )}: You may need to change "file.contentType" to "contentType"`
+            )}: You might need to change flatten the Contentful Asset structure: "file.contentType" -> "contentType"`
           )
         }
       },
@@ -169,9 +169,26 @@ export function updateImport(babel) {
             console.log(
               `${renderFilename(path, state)}: You might need to change "${
                 path.node.property?.name
-              }" to "${updateContentfulSelector(path.node.property.name)}"`
+              }" -> "${updateContentfulSelector(path.node.property.name)}"`
             )
           }
+        }
+        if (path.node.property?.name === `contentful_id`) {
+          console.log(
+            `${renderFilename(
+              path,
+              state
+            )}: You might need to change "contentful_id" -> "sys.id"`
+          )
+        }
+
+        if (path.node.property?.name === `file`) {
+          console.log(
+            `${renderFilename(
+              path,
+              state
+            )}: You might need to change flatten the Contentful Asset structure: "file.details.image.width" -> "width"`
+          )
         }
       },
       TaggedTemplateExpression({ node }, state) {
