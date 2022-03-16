@@ -89,7 +89,7 @@ export function updateImport(babel) {
             `${renderFilename(
               path,
               state
-            )}: You should change "contentfulId" to "sys.id"`
+            )}: You may need to change "contentfulId" to "sys.id"`
           )
         }
         if (path.node.name === `type`) {
