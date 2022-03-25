@@ -539,7 +539,7 @@ export const createNodesForContentType = ({
         entryNode = {
           ...entryItemFields,
           ...entryNode,
-          metadata: {
+          contentfulMetadata: {
             tags___NODE: entryItem.metadata.tags.map(tag =>
               createNodeId(`ContentfulTag__${space.sys.id}__${tag.sys.id}`)
             ),
@@ -616,7 +616,7 @@ export const createAssetNodes = ({
       width: file.details?.image?.width ?? null,
       height: file.details?.image?.height ?? null,
       size: file.details?.size ?? null,
-      metadata: {
+      contentfulMetadata: {
         tags___NODE: assetItem.metadata.tags.map(tag =>
           createNodeId(`ContentfulTag__${space.sys.id}__${tag.sys.id}`)
         ),
