@@ -4,6 +4,7 @@ const tests = [
   `graphql-sort`,
   `metadata`,
   `query-results`,
+  `rich-text`,
   `sys`,
   `sys-type`,
 ]

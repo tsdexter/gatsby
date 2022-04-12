@@ -28,7 +28,7 @@ export function babelRecast(code, filePath) {
     cloneInputAst: false,
     code: false,
     ast: true,
-    plugins: [[updateImport, changedTracker]],
+    plugins: [[transformContentful, changedTracker]],
   }
 
   const { ast } = transformFromAstSync(transformedAst, code, options)
@@ -39,7 +39,7 @@ export function babelRecast(code, filePath) {
   return code
 }
 
-const CONTENT_TYPE_SELECTOR_REGEX = /^(allContentful|contentful)([A-Z0-9].+)/
+const CONTENT_TYPE_SELECTOR_REGEX = /^(allContentful|[Cc]ontentful)([A-Z0-9].+)/
 const CONTENT_TYPE_SELECTOR_BLACKLIST = [`Asset`, `Reference`, `Id`]
 const SYS_FIELDS_TRANSFORMS = new Map([
   [`node_locale`, `locale`],
@@ -87,8 +87,12 @@ const injectNewFields = (selections, newFields, fieldToReplace) => {
   ]
 }
 
-export function updateImport(babel) {
+export function transformContentful(babel) {
   const { types: t, template } = babel
+
+  const isObjectExpression = node =>
+    t.isOptionalMemberExpression(node) || t.isMemberExpression(node)
+
   return {
     visitor: {
       Identifier(path, state) {
@@ -236,7 +240,129 @@ export function updateImport(babel) {
           }
         }
       },
+      VariableDeclarator(path, state) {
+        // Rewrite RichText options to makeOptions factory
+        if (path.node.id.name === `options`) {
+          const RICH_TEXT_RENDER_FIELDS = [
+            `renderMark`,
+            `renderNode`,
+            `renderText`,
+          ]
+          const isRichTextOptions = path.node.init.properties.find(
+            node =>
+              node.type === `ObjectProperty` &&
+              RICH_TEXT_RENDER_FIELDS.includes(node.key.name)
+          )
+
+          if (isRichTextOptions) {
+            const optionsDeclaration = cloneDeep(path.node.init)
+
+            path.node.id.name = `makeOptions`
+            path.node.init = t.arrowFunctionExpression(
+              [
+                t.objectPattern([
+                  t.objectProperty(
+                    t.identifier(`assetBlockMap`),
+                    t.identifier(`assetBlockMap`),
+                    false,
+                    true
+                  ),
+                  t.objectProperty(
+                    t.identifier(`entryBlockMap`),
+                    t.identifier(`entryBlockMap`),
+                    false,
+                    true
+                  ),
+                  t.objectProperty(
+                    t.identifier(`entryInlineMap`),
+                    t.identifier(`entryInlineMap`),
+                    false,
+                    true
+                  ),
+                ]),
+              ],
+              optionsDeclaration
+            )
+            state.opts.hasChanged = true
+          }
+        }
+
+        // Rewrite RichText render node getters
+        if (
+          isObjectExpression(path.node.init) &&
+          path.node.init.property?.name === `target` &&
+          isObjectExpression(path.node.init.object) &&
+          path.node.init.object.property.name === `data` &&
+          t.isIdentifier(path.node.init.object.object) &&
+          path.node.init.object.object.name === `node`
+        ) {
+          const idExpression = t.optionalMemberExpression(
+            t.optionalMemberExpression(
+              t.optionalMemberExpression(
+                t.MemberExpression(t.identifier(`node`), t.identifier(`data`)),
+                t.identifier(`target`),
+                false,
+                true
+              ),
+              t.identifier(`sys`),
+              false,
+              true
+            ),
+            t.identifier(`id`),
+            false,
+            true
+          )
+
+          // Figure out in which rendering context we are (asset/entry + block/inline)
+          const expression = path.findParent(path => path.isObjectProperty())
+
+          const mapIdentifier = []
+
+          const RICH_TEXT_RENDER_TYPES = {
+            BLOCKS: `Block`,
+            INLINES: `Inline`,
+          }
+
+          const RICH_TEXT_ENTRY_TYPES = {
+            EMBEDDED_ASSET: `asset`,
+            EMBEDDED_ENTRY: `entry`,
+          }
+
+          if (t.isMemberExpression(expression?.node.key)) {
+            const renderType = expression?.node.key.object?.name
+            const entryType = expression?.node.key.property?.name
+            if (
+              !RICH_TEXT_ENTRY_TYPES[entryType] ||
+              !RICH_TEXT_RENDER_TYPES[renderType]
+            ) {
+              return
+            }
+            mapIdentifier.push(RICH_TEXT_ENTRY_TYPES[entryType])
+            mapIdentifier.push(RICH_TEXT_RENDER_TYPES[renderType])
+          }
+
+          mapIdentifier.push(`Map`)
+
+          path.node.init = t.callExpression(
+            t.memberExpression(
+              t.identifier(mapIdentifier.join(``)),
+              t.identifier(`get`)
+            ),
+            [idExpression]
+          )
+          state.opts.hasChanged = true
+        }
+      },
       CallExpression({ node }, state) {
+        if (node.callee.name === `renderRichText`) {
+          node.arguments.forEach(argument => {
+            if (argument.name === `options`) {
+              argument.name = `makeOptions`
+            }
+            state.opts.hasChanged = true
+          })
+          return
+        }
         if (node.callee.name !== `graphql`) {
           return
         }
@@ -330,6 +456,153 @@ const flattenAssetFields = node => {
     }
   }
   return flatAssetFields
+}
+
+function updateFragmentNames(node) {
+  node.selectionSet?.selections.forEach(node => {
+    if (
+      node.kind === `InlineFragment` &&
+      isContentTypeSelector(node.typeCondition.name.value)
+    ) {
+      node.typeCondition.name.value = updateContentfulSelector(
+        node.typeCondition.name.value
+      )
+    }
+    updateFragmentNames(node)
+  })
+}
+
+function transformRichTextFields(node) {
+  const rawField = locateSubfield(node, `raw`)
+  const referencesField = locateSubfield(node, `references`)
+  const richTextFields = []
+  if (rawField) {
+    const jsonField = { ...cloneDeep(rawField) }
+    jsonField.name.value = `json`
+    richTextFields.push(jsonField)
+  }
+  if (referencesField) {
+    let assetsSelection = []
+    const entriesSelection = []
+    referencesField.selectionSet.selections.forEach(node => {
+      if (node.kind === `InlineFragment`) {
+        if (node.typeCondition.name.value === `ContentfulAsset`) {
+          assetsSelection = node.selectionSet.selections
+          return
+        }
+        // Rename selector
+        node.typeCondition.name.value = updateContentfulSelector(
+          node.typeCondition.name.value
+        )
+        // Remove contentful_id fields
+        node.selectionSet.selections = node.selectionSet.selections.filter(
+          node => node.name?.value !== `contentful_id`
+        )
+
+        // Update all Fragment names within this new fields
+        updateFragmentNames(node)
+
+        entriesSelection.push(node)
+      }
+    })
+
+    const assetsBlock = {
+      kind: `Field`,
+      name: {
+        kind: `Name`,
+        value: `block`,
+      },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: assetsSelection,
+      },
+    }
+
+    const assetsField = {
+      kind: `Field`,
+      name: {
+        kind: `Name`,
+        value: `assets`,
+      },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: [assetsBlock],
+      },
+    }
+
+    const typenameField = {
+      kind: `Field`,
+      name: { kind: `Name`, value: `__typename` },
+    }
+    const sysField = {
+      kind: `Field`,
+      name: { kind: `Name`, value: `sys` },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: [
+          {
+            kind: `Field`,
+            name: { kind: `Name`, value: `id` },
+          },
+          {
+            kind: `Field`,
+            name: { kind: `Name`, value: `type` },
+          },
+        ],
+      },
+    }
+
+    const entriesBlock = {
+      kind: `Field`,
+      name: {
+        kind: `Name`,
+        value: `block`,
+      },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: [typenameField, sysField, ...entriesSelection],
+      },
+    }
+
+    const entriesInline = {
+      kind: `Field`,
+      name: {
+        kind: `Name`,
+        value: `inline`,
+      },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: [typenameField, sysField, ...entriesSelection],
+      },
+    }
+
+    const entriesField = {
+      kind: `Field`,
+      name: {
+        kind: `Name`,
+        value: `entries`,
+      },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: [entriesBlock, entriesInline],
+      },
+    }
+
+    const linksField = {
+      kind: `Field`,
+      name: {
+        kind: `Name`,
+        value: `links`,
+      },
+      selectionSet: {
+        kind: `SelectionSet`,
+        selections: [assetsField, entriesField],
+      },
+    }
+
+    richTextFields.push(linksField)
+  }
+  return richTextFields
 }
 
 function processGraphQLQuery(query, state) {
@@ -468,7 +741,7 @@ function processGraphQLQuery(query, state) {
           SYS_FIELDS_TRANSFORMS.has(name?.value)
         )
 
-        if (contentfulSysFields.length && parent.name.value !== `sys`) {
+        if (contentfulSysFields.length && parent?.name?.value !== `sys`) {
           const transformedSysFields = cloneDeep(contentfulSysFields).map(
             field => {
               field.name.value = SYS_FIELDS_TRANSFORMS.get(field.name.value)
@@ -511,6 +784,26 @@ function processGraphQLQuery(query, state) {
           )
 
           hasChanged = true
+        }
+        // Convert Rich text field
+        const richTextFields = transformRichTextFields(node)
+
+        if (richTextFields.length) {
+          node.selectionSet.selections = richTextFields
+
+          hasChanged = true
+        }
+        // Rename Fragment names
+        if (node.kind === `InlineFragment`) {
+          const fragmentName = node.typeCondition.name.value
+
+          if (isContentTypeSelector(fragmentName)) {
+            node.typeCondition.name.value = updateContentfulSelector(
+              node.typeCondition.name.value
+            )
+            updateFragmentNames(node)
+            hasChanged = true
+          }
         }
       },
     })
