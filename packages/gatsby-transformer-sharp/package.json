@@ -14,12 +14,12 @@
     "fs-extra": "^10.0.0",
     "probe-image-size": "^7.2.3",
     "semver": "^7.3.5",
-    "sharp": "^0.30.3"
+    "sharp": "^0.30.4"
   },
   "devDependencies": {
     "@babel/cli": "^7.15.4",
     "@babel/core": "^7.15.5",
-    "@types/sharp": "^0.30.0",
+    "@types/sharp": "^0.30.2",
     "babel-preset-gatsby-package": "^2.14.0-next.1",
     "cross-env": "^7.0.3"
   },
