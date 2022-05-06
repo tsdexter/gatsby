@@ -443,7 +443,6 @@ export type ActionsUnion =
   | IClearJobV2Context
   | IProcessGatsbyImageSourceUrlAction
   | IClearGatsbyImageSourceUrlAction
-  | IMergeGatsbyImageSourceUrlTelemetryState
 
 export interface ISetComponentFeatures {
   type: `SET_COMPONENT_FEATURES`
