@@ -953,7 +953,7 @@ type CreateNodeInput = {
  *   value: `is sweet graphql queries`
  * })
  *
- * // The field value is now accessible at node.fields.happiness
+ * // The field value is now accessible at node.fields.happiness during build time, custom resolvers, etc. It is not accessible in GraphQL queries
  */
 actions.createNodeField = (
   { node, name, value }: CreateNodeInput,
